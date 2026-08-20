@@ -7,7 +7,7 @@ para alertas — el mismo tipo de stack que usan equipos de infraestructura en p
 > Este README se actualiza a medida que avanza el proyecto. Refleja el estado real del
 > repositorio en cada momento, no un plan aspiracional.
 
-## Estado actual — Fase 1 completada ✅
+## Estado actual — Fases 1 y 2 completadas ✅
 
 ### Qué funciona ahora mismo
 
@@ -17,6 +17,14 @@ para alertas — el mismo tipo de stack que usan equipos de infraestructura en p
 - Desplegada en **Kubernetes** (namespace `pulseboard`) como un `Deployment` de 3 réplicas
   + un `Service` — verificado corriendo en minikube, con los 3 Pods en estado
   `Running`/`Ready`.
+- **Prometheus** instalado vía Helm (`kube-prometheus-stack`, namespace `monitoring`),
+  corriendo como `StatefulSet` con almacenamiento persistente (10Gi, retención 15 días).
+- Descubrimiento automático de los Pods de `pulseboard-api` vía anotaciones
+  (`prometheus.io/scrape|port|path`) — verificado en la UI de Prometheus
+  (`Status → Targets`): 3 targets `UP`, uno por réplica.
+- **Alertmanager** y **Grafana** también quedaron instalados como parte del mismo chart
+  (Alertmanager como `StatefulSet`; Grafana aún sin dashboards propios — eso es la
+  Fase 3).
 
 ### Endpoints disponibles
 
@@ -32,6 +40,8 @@ para alertas — el mismo tipo de stack que usan equipos de infraestructura en p
 - Python 3.12 · FastAPI · Uvicorn · prometheus-fastapi-instrumentator
 - Docker
 - Kubernetes (minikube, local)
+- Helm 3 · `kube-prometheus-stack` (Prometheus, Alertmanager, Grafana, kube-state-metrics,
+  node-exporter, Prometheus Operator)
 
 ### Cómo correr la API localmente
 
@@ -52,15 +62,19 @@ kubectl apply -f k8s/api-deployment.yaml
 kubectl port-forward -n pulseboard svc/pulseboard-api 8000:80
 ```
 
-## Roadmap — lo que falta
+### Cómo instalar Prometheus (Helm)
 
-### Fase 2 — Helm y Prometheus (pendiente)
-- Instalar Helm 3.
-- Instalar `kube-prometheus-stack` vía Helm en un namespace `monitoring` separado.
-- Configurar `additionalScrapeConfigs` para que Prometheus descubra los Pods de
-  `pulseboard-api` usando las anotaciones `prometheus.io/scrape|port|path` ya presentes
-  en el Deployment.
-- Verificar en la UI de Prometheus (`Status → Targets`) que `pulseboard-api` aparece `UP`.
+```powershell
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+kubectl create namespace monitoring
+helm install prometheus prometheus-community/kube-prometheus-stack `
+  --namespace monitoring `
+  --values helm-values/prometheus-values.yaml
+kubectl port-forward -n monitoring svc/prometheus-kube-prometheus-prometheus 9090:9090
+```
+
+## Roadmap — lo que falta
 
 ### Fase 3 — Grafana y dashboards como código (pendiente)
 - Grafana se instala junto con el chart de Prometheus.
@@ -85,6 +99,18 @@ kubectl port-forward -n pulseboard svc/pulseboard-api 8000:80
 - Diagrama de arquitectura del stack completo.
 - Sección de "decisiones técnicas": por qué StatefulSet para Prometheus, por qué
   DaemonSet para Promtail, por qué ClusterRole para el RBAC.
+
+## Decisiones técnicas
+
+### Contraseña de Grafana en texto plano
+
+`helm-values/prometheus-values.yaml` fija `grafana.adminPassword` como texto plano, y
+ese archivo sí está versionado en git. Es una simplificación deliberada para este
+proyecto: el cluster es 100% local (minikube, nunca expuesto a internet) y la
+contraseña es desechable, solo para desarrollo/aprendizaje. **En un entorno de
+producción real esto no se haría así** — se usaría un `Secret` de Kubernetes
+(referenciado vía `grafana.admin.existingSecret` en el chart) para que la contraseña
+real nunca quede en texto plano dentro del repositorio.
 
 ## Conceptos de Kubernetes cubiertos en este proyecto
 

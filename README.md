@@ -7,7 +7,7 @@ para alertas — el mismo tipo de stack que usan equipos de infraestructura en p
 > Este README se actualiza a medida que avanza el proyecto. Refleja el estado real del
 > repositorio en cada momento, no un plan aspiracional.
 
-## Estado actual — Fases 1 y 2 completadas ✅
+## Estado actual — Fases 1, 2 y 3 completadas ✅
 
 ### Qué funciona ahora mismo
 
@@ -22,9 +22,12 @@ para alertas — el mismo tipo de stack que usan equipos de infraestructura en p
 - Descubrimiento automático de los Pods de `pulseboard-api` vía anotaciones
   (`prometheus.io/scrape|port|path`) — verificado en la UI de Prometheus
   (`Status → Targets`): 3 targets `UP`, uno por réplica.
-- **Alertmanager** y **Grafana** también quedaron instalados como parte del mismo chart
-  (Alertmanager como `StatefulSet`; Grafana aún sin dashboards propios — eso es la
-  Fase 3).
+- **Alertmanager** también quedó instalado como parte del mismo chart (como `StatefulSet`;
+  sus reglas de alerta propias son la Fase 5).
+- **Dashboard de Grafana propio** ("PulseBoard API") cargado automáticamente vía
+  `ConfigMap` con la label `grafana_dashboard: "1"` (sin tocar la UI a mano) — 3 paneles:
+  request rate, latencia P95, y error rate. Verificado con tráfico real generado por
+  `hey` (3,774 requests, 100% `200 OK`, P95 ~289ms).
 
 ### Endpoints disponibles
 
@@ -42,6 +45,7 @@ para alertas — el mismo tipo de stack que usan equipos de infraestructura en p
 - Kubernetes (minikube, local)
 - Helm 3 · `kube-prometheus-stack` (Prometheus, Alertmanager, Grafana, kube-state-metrics,
   node-exporter, Prometheus Operator)
+- `hey` (generador de carga HTTP, usado para poblar los dashboards con tráfico real)
 
 ### Cómo correr la API localmente
 
@@ -74,12 +78,18 @@ helm install prometheus prometheus-community/kube-prometheus-stack `
 kubectl port-forward -n monitoring svc/prometheus-kube-prometheus-prometheus 9090:9090
 ```
 
-## Roadmap — lo que falta
+### Cómo ver el dashboard de Grafana y generar tráfico de prueba
 
-### Fase 3 — Grafana y dashboards como código (pendiente)
-- Grafana se instala junto con el chart de Prometheus.
-- Dashboard propio como `ConfigMap` versionado en Git (no creado a mano desde la UI):
-  request rate, latencia P95, error rate.
+```powershell
+kubectl apply -f k8s/grafana-dashboard-configmap.yaml
+kubectl port-forward -n monitoring svc/prometheus-grafana 3000:80
+# http://localhost:3000 — admin / pulseboard123 — Dashboards → "PulseBoard API"
+
+# En otra terminal, con el port-forward de la API activo (puerto 8000):
+hey -z 60s -c 10 http://localhost:8000/items/5
+```
+
+## Roadmap — lo que falta
 
 ### Fase 4 — Loki + Promtail, logs centralizados (pendiente)
 - Instalar `loki-stack` vía Helm (Promtail corre como `DaemonSet`, un Pod por nodo).
@@ -118,5 +128,9 @@ real nunca quede en texto plano dentro del repositorio.
 - `DaemonSet` (un Pod por nodo).
 - `Helm` como gestor de paquetes de Kubernetes.
 - Service discovery basado en anotaciones de Pod para Prometheus.
+- Patrón *sidecar* (config-reloader de Prometheus/Alertmanager, dashboard-loader de
+  Grafana) para recarga en caliente sin reiniciar el proceso principal.
+- Dashboards de Grafana como código (`ConfigMap` + label, sin crear nada a mano en la UI).
+- Métricas de Prometheus: `Counter` + `rate()`, `Histogram` + `histogram_quantile()`.
 - `RBAC`: `Role`/`RoleBinding` (por namespace) vs `ClusterRole`/`ClusterRoleBinding`
   (todo el cluster).

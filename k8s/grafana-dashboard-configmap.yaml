@@ -43,6 +43,19 @@ data:
           "targets": [
             { "expr": "rate(http_requests_total{status=~'5..'}[5m]) / rate(http_requests_total[5m]) * 100"}          
           ]
+        },
+        {
+          "id": 4,
+          "title": "Logs",
+          "type": "logs",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+          "targets": [
+            {
+              "datasource": { "type": "loki", "uid": "loki" },
+              "expr": "{namespace=\"pulseboard\", app=\"pulseboard-api\"}"
+            }
+          ]
         }
       ]
     }

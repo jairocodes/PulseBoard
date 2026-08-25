@@ -7,7 +7,7 @@ para alertas — el mismo tipo de stack que usan equipos de infraestructura en p
 > Este README se actualiza a medida que avanza el proyecto. Refleja el estado real del
 > repositorio en cada momento, no un plan aspiracional.
 
-## Estado actual — Fases 1, 2 y 3 completadas ✅
+## Estado actual — Fases 1, 2, 3 y 4 completadas ✅
 
 ### Qué funciona ahora mismo
 
@@ -25,9 +25,19 @@ para alertas — el mismo tipo de stack que usan equipos de infraestructura en p
 - **Alertmanager** también quedó instalado como parte del mismo chart (como `StatefulSet`;
   sus reglas de alerta propias son la Fase 5).
 - **Dashboard de Grafana propio** ("PulseBoard API") cargado automáticamente vía
-  `ConfigMap` con la label `grafana_dashboard: "1"` (sin tocar la UI a mano) — 3 paneles:
-  request rate, latencia P95, y error rate. Verificado con tráfico real generado por
-  `hey` (3,774 requests, 100% `200 OK`, P95 ~289ms).
+  `ConfigMap` con la label `grafana_dashboard: "1"` (sin tocar la UI a mano) — 4 paneles:
+  request rate, latencia P95, error rate, y logs en vivo. Verificado con tráfico real
+  generado por `hey` (3,774 requests, 100% `200 OK`, P95 ~289ms).
+- **Loki** instalado vía Helm (`grafana/loki`, modo `SingleBinary`, namespace `monitoring`)
+  con almacenamiento en filesystem (PVC de 5Gi) — sin las cachés `memcached` opcionales
+  del chart, apagadas a propósito por límites de memoria del cluster local.
+- **Promtail** instalado vía Helm (`grafana/promtail`) como `DaemonSet` — descubre y
+  recolecta automáticamente los logs de todos los Pods del cluster (sin anotaciones
+  manuales) y los envía a Loki.
+- **Loki registrado como datasource de Grafana** vía `ConfigMap` con la label
+  `grafana_datasource: "1"` (mismo patrón "todo como código" que el dashboard) —
+  verificado con logs reales de `pulseboard-api` visibles tanto en Grafana Explore
+  (LogQL) como en el panel de logs del dashboard.
 
 ### Endpoints disponibles
 
@@ -45,6 +55,7 @@ para alertas — el mismo tipo de stack que usan equipos de infraestructura en p
 - Kubernetes (minikube, local)
 - Helm 3 · `kube-prometheus-stack` (Prometheus, Alertmanager, Grafana, kube-state-metrics,
   node-exporter, Prometheus Operator)
+- Helm 3 · `grafana/loki` (modo `SingleBinary`) + `grafana/promtail`
 - `hey` (generador de carga HTTP, usado para poblar los dashboards con tráfico real)
 
 ### Cómo correr la API localmente
@@ -89,11 +100,21 @@ kubectl port-forward -n monitoring svc/prometheus-grafana 3000:80
 hey -z 60s -c 10 http://localhost:8000/items/5
 ```
 
-## Roadmap — lo que falta
+### Cómo instalar Loki + Promtail y ver logs en Grafana
 
-### Fase 4 — Loki + Promtail, logs centralizados (pendiente)
-- Instalar `loki-stack` vía Helm (Promtail corre como `DaemonSet`, un Pod por nodo).
-- Consultar logs de todos los Pods desde Grafana Explore usando LogQL.
+```powershell
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo update
+helm install loki grafana/loki -n monitoring --values helm-values/loki-values.yaml
+helm install promtail grafana/promtail -n monitoring --values helm-values/promtail-values.yaml
+
+kubectl apply -f k8s/grafana-loki-datasource-configmap.yaml
+kubectl apply -f k8s/grafana-dashboard-configmap.yaml
+# Grafana → Explore → datasource "Loki":
+# {namespace="pulseboard", app="pulseboard-api"}
+```
+
+## Roadmap — lo que falta
 
 ### Fase 5 — Alertmanager y reglas de alerta (pendiente)
 - Reglas `PrometheusRule`: `HighErrorRate` (error rate > 5%) y `PodCrashLooping`.
@@ -122,6 +143,19 @@ producción real esto no se haría así** — se usaría un `Secret` de Kubernet
 (referenciado vía `grafana.admin.existingSecret` en el chart) para que la contraseña
 real nunca quede en texto plano dentro del repositorio.
 
+### Loki en modo `SingleBinary`, sin cachés y sin multi-tenancy
+
+`helm-values/loki-values.yaml` fuerza `deploymentMode: SingleBinary` (un solo Pod hace
+ingestión, almacenamiento y consultas) en vez del modo distribuido por defecto del chart
+(`read`/`write`/`backend`/`gateway`/`MinIO` separados), y además desactiva las cachés
+`memcached` opcionales (`chunksCache`/`resultsCache`): en un cluster local de un solo
+nodo con memoria limitada, esas cachés (que piden ~10Gi cada una) nunca lograban
+agendarse. También se desactiva `auth_enabled` (multi-tenancy), ya que exigir el header
+`X-Scope-OrgID` en cada llamada solo tiene sentido cuando varios equipos comparten un
+mismo Loki — no aplica a un cluster de aprendizaje de un solo inquilino. **En un entorno
+de producción real con múltiples nodos**, el modo distribuido y las cachés sí aportan
+valor real de escalabilidad y rendimiento.
+
 ## Conceptos de Kubernetes cubiertos en este proyecto
 
 - `Deployment` vs `StatefulSet` (identidad estable, almacenamiento persistente).
@@ -130,7 +164,10 @@ real nunca quede en texto plano dentro del repositorio.
 - Service discovery basado en anotaciones de Pod para Prometheus.
 - Patrón *sidecar* (config-reloader de Prometheus/Alertmanager, dashboard-loader de
   Grafana) para recarga en caliente sin reiniciar el proceso principal.
-- Dashboards de Grafana como código (`ConfigMap` + label, sin crear nada a mano en la UI).
+- Dashboards y datasources de Grafana como código (`ConfigMap` + label, sin crear nada
+  a mano en la UI).
 - Métricas de Prometheus: `Counter` + `rate()`, `Histogram` + `histogram_quantile()`.
+- Logs centralizados con Loki y LogQL (`{label="valor"}`, filtros `|=`), y cómo Promtail
+  etiqueta cada línea automáticamente con metadata del Pod (namespace, labels).
 - `RBAC`: `Role`/`RoleBinding` (por namespace) vs `ClusterRole`/`ClusterRoleBinding`
   (todo el cluster).

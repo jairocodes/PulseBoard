@@ -7,7 +7,7 @@ para alertas — el mismo tipo de stack que usan equipos de infraestructura en p
 > Este README se actualiza a medida que avanza el proyecto. Refleja el estado real del
 > repositorio en cada momento, no un plan aspiracional.
 
-## Estado actual — Fases 1, 2, 3 y 4 completadas ✅
+## Estado actual — Fases 1, 2, 3, 4 y 5 completadas ✅
 
 ### Qué funciona ahora mismo
 
@@ -38,6 +38,11 @@ para alertas — el mismo tipo de stack que usan equipos de infraestructura en p
   `grafana_datasource: "1"` (mismo patrón "todo como código" que el dashboard) —
   verificado con logs reales de `pulseboard-api` visibles tanto en Grafana Explore
   (LogQL) como en el panel de logs del dashboard.
+- **Reglas de alerta** (`PrometheusRule`, CRD del Prometheus Operator) para
+  `HighErrorRate` (error rate > 5%) y `PodCrashLooping` — verificadas cargando y
+  evaluando correctamente (`Status → Rules` en Prometheus, ambas en `OK`). El receiver
+  de Alertmanager queda como `"null"` por defecto (confirmado inspeccionando el Secret
+  real que genera Helm) — las alertas se verifican vía UI, sin depender de un Slack real.
 
 ### Endpoints disponibles
 
@@ -114,12 +119,20 @@ kubectl apply -f k8s/grafana-dashboard-configmap.yaml
 # {namespace="pulseboard", app="pulseboard-api"}
 ```
 
-## Roadmap — lo que falta
+### Cómo aplicar y verificar las reglas de alerta
 
-### Fase 5 — Alertmanager y reglas de alerta (pendiente)
-- Reglas `PrometheusRule`: `HighErrorRate` (error rate > 5%) y `PodCrashLooping`.
-- Enrutamiento de alertas verificado vía UI de Alertmanager (o `webhook.site` para
-  capturas de portafolio), sin depender de un Slack real.
+```powershell
+kubectl apply -f k8s/alert-rules.yaml
+kubectl get prometheusrule -n pulseboard
+kubectl port-forward -n monitoring svc/prometheus-kube-prometheus-prometheus 9090:9090
+# http://localhost:9090 → Status → Rules → grupo "pulseboard.api"
+
+# Inspeccionar el receiver real que Helm generó para Alertmanager:
+$b64 = kubectl get secret -n monitoring alertmanager-prometheus-kube-prometheus-alertmanager -o jsonpath="{.data.alertmanager\.yaml}"
+[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64))
+```
+
+## Roadmap — lo que falta
 
 ### RBAC para Prometheus (pendiente)
 - `ClusterRole` + `ClusterRoleBinding` para que Prometheus pueda descubrir Pods y
@@ -167,6 +180,10 @@ valor real de escalabilidad y rendimiento.
 - Dashboards y datasources de Grafana como código (`ConfigMap` + label, sin crear nada
   a mano en la UI).
 - Métricas de Prometheus: `Counter` + `rate()`, `Histogram` + `histogram_quantile()`.
+- `PrometheusRule` (CRD) y la máquina de estados de una alerta (`inactive` →
+  `pending` → `firing`, controlada por `for:`).
+- Enrutamiento y supresión de alertas en Alertmanager (`route`, `receiver`,
+  `inhibit_rules`).
 - Logs centralizados con Loki y LogQL (`{label="valor"}`, filtros `|=`), y cómo Promtail
   etiqueta cada línea automáticamente con metadata del Pod (namespace, labels).
 - `RBAC`: `Role`/`RoleBinding` (por namespace) vs `ClusterRole`/`ClusterRoleBinding`

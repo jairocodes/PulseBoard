@@ -1,0 +1,28 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata: 
+  name: pulseboard-alerts
+  namespace: pulseboard
+  labels: 
+    release: prometheus
+spec: 
+  groups:
+  - name: pulseboard.api
+    rules: 
+      - alert: HighErrorRate
+        expr: |
+          rate(http_requests_total{job="pulseboard-api",status=~"5.."}[5m])
+          / rate(http_requests_total{job="pulseboard-api"}[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Error rate > 5%  en pulseboard-api"
+          description: "{{ $value | humanizePercentage }} de requests fallando"
+      - alert: PodCrashLooping
+        expr: rate(kube_pod_container_status_restarts_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations: 
+          summary: "Pod {{ $labels.pod }} reiniciando en loop"

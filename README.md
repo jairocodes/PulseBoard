@@ -43,6 +43,10 @@ para alertas — el mismo tipo de stack que usan equipos de infraestructura en p
   evaluando correctamente (`Status → Rules` en Prometheus, ambas en `OK`). El receiver
   de Alertmanager queda como `"null"` por defecto (confirmado inspeccionando el Secret
   real que genera Helm) — las alertas se verifican vía UI, sin depender de un Slack real.
+- **RBAC propio para Prometheus** (`k8s/prometheus-rbac.yaml`, `ClusterRole` +
+  `ClusterRoleBinding`), adicional al que ya genera Helm — vinculado al `ServiceAccount`
+  real que usa el Pod de Prometheus. Verificado con un antes/después real de
+  `kubectl auth can-i get configmaps --as=system:serviceaccount:...` (`no` → `yes`).
 
 ### Endpoints disponibles
 
@@ -132,11 +136,18 @@ $b64 = kubectl get secret -n monitoring alertmanager-prometheus-kube-prometheus-
 [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64))
 ```
 
-## Roadmap — lo que falta
+### Cómo aplicar y verificar el RBAC propio de Prometheus
 
-### RBAC para Prometheus (pendiente)
-- `ClusterRole` + `ClusterRoleBinding` para que Prometheus pueda descubrir Pods y
-  Services en todos los namespaces del cluster, no solo en `monitoring`.
+```powershell
+kubectl apply -f k8s/prometheus-rbac.yaml
+kubectl get clusterrole pulseboard-prometheus-reader
+kubectl get clusterrolebinding pulseboard-prometheus-reader
+
+# Antes/después real de un permiso que solo otorga este archivo (Helm no lo daba):
+kubectl auth can-i get configmaps --as=system:serviceaccount:monitoring:prometheus-kube-prometheus-prometheus
+```
+
+## Roadmap — lo que falta
 
 ### Cierre de portafolio (pendiente)
 - Capturas de Grafana y Loki con tráfico real generado (`hey`).
@@ -169,6 +180,18 @@ mismo Loki — no aplica a un cluster de aprendizaje de un solo inquilino. **En 
 de producción real con múltiples nodos**, el modo distribuido y las cachés sí aportan
 valor real de escalabilidad y rendimiento.
 
+### RBAC propio, nombrado aparte del que gestiona Helm
+
+`k8s/prometheus-rbac.yaml` define su propio `ClusterRole`/`ClusterRoleBinding`
+(`pulseboard-prometheus-reader`) en vez de reutilizar el nombre `prometheus` que sugería
+la guía original. Los objetos que crea Helm (`prometheus-kube-prometheus-prometheus`,
+etc.) llevan annotations (`meta.helm.sh/release-name`) que le permiten a `helm uninstall`
+saber qué borrar; un nombre distinto deja claro que este RBAC es nuestro, escrito a mano,
+y que Helm no lo va a tocar ni a limpiar automáticamente — si se elimina, es con
+`kubectl delete -f k8s/prometheus-rbac.yaml`. Es intencionalmente redundante con permisos
+que Prometheus ya tenía (RBAC es aditivo, no hay conflicto posible), y su único propósito
+es de aprendizaje — verificado con un permiso real (`configmaps: get`) que sí añade.
+
 ## Conceptos de Kubernetes cubiertos en este proyecto
 
 - `Deployment` vs `StatefulSet` (identidad estable, almacenamiento persistente).
@@ -184,6 +207,8 @@ valor real de escalabilidad y rendimiento.
   `pending` → `firing`, controlada por `for:`).
 - Enrutamiento y supresión de alertas en Alertmanager (`route`, `receiver`,
   `inhibit_rules`).
+- `RBAC`: naturaleza aditiva de los permisos (nunca hay "deny"), `ServiceAccount` como
+  identidad de un Pod frente a la API, y verificación real con `kubectl auth can-i`.
 - Logs centralizados con Loki y LogQL (`{label="valor"}`, filtros `|=`), y cómo Promtail
   etiqueta cada línea automáticamente con metadata del Pod (namespace, labels).
 - `RBAC`: `Role`/`RoleBinding` (por namespace) vs `ClusterRole`/`ClusterRoleBinding`
